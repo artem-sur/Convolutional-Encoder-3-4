@@ -1,0 +1,140 @@
+% Modulator, Demodulator, AWGN channel, Encoder, Decoder, Error counter creation:
+hMod = comm.GMSKModulator('BitInput', true, 'SamplesPerSymbol', 1); 
+hDemod = comm.GMSKDemodulator('BitOutput', true, 'SamplesPerSymbol', 1, 'TracebackDepth', 16);
+ebno = 20;
+hAWGN = comm.AWGNChannel('NoiseMethod', 'Signal to noise ratio (Eb/No)', 'EbNo', ebno);
+pPatternVec = [1;1;0;1;1;0];
+hEnc = comm.ConvolutionalEncoder(poly2trellis(3, [5 7]), 'TerminationMethod', 'Continuous', 'PuncturePatternSource','Property', 'PuncturePattern',pPatternVec);
+hDec = comm.ViterbiDecoder(poly2trellis(3, [5 7]), 'InputFormat','Hard', 'TerminationMethod', 'Continuous', 'PuncturePatternSource','Property', 'PuncturePattern', pPatternVec, 'TracebackDepth', 96);
+hError = comm.ErrorRate('ReceiveDelay', 108);
+
+% Measure of BER for self-made and build-in encoder:
+EbNoRange = -10:.5:10; 
+data_length = 4002;
+data = randi([0 1],data_length,1);
+ownEncData = ownEnc(data);
+ownModData = step(hMod, ownEncData);
+encData = step(hEnc, data);
+modData = step(hMod, encData);
+for n=1:length(EbNoRange)
+    reset(hError)
+    reset(hEnc)
+    reset(hDec)
+    count = EbNoRange(n)
+    hAWGN.EbNo = EbNoRange(n);
+    ownChData = step(hAWGN, ownModData);
+    ownDemodData = step(hDemod, ownChData);
+    ownDecData = step(hDec, ownDemodData);
+    ownBERVec(:,n) = step(hError, data, ownDecData);
+    fprintf('Error rate 1 = %f\nNumber of errors = %d\nTotal bits = %d\n', ...
+ownBERVec(1,n), ownBERVec(2,n), ownBERVec(3,n))
+    reset(hError)
+    reset(hDec)
+    chData = step(hAWGN, modData);
+    demodData = step(hDemod, chData);
+    decData = step(hDec, demodData);
+    BERVec(:,n) = step(hError, data, decData);
+    fprintf('Error rate 2 = %f\nNumber of errors = %d\nTotal bits = %d\n', ...
+BERVec(1,n), BERVec(2,n), BERVec(3,n))
+end 
+
+% Graphical compare of BER:
+berfit(EbNoRange,ownBERVec(1,:));
+hold on;
+berfit(EbNoRange,BERVec(1,:))
+legend('','BER of self-made encoder',...
+    '','BER of build-in encoder')
+axis([-10 10 10^-2 10^0])
+
+% Functioon of self-made encoder (R = 3/4):
+function enc4 = ownEnc(data)
+enc6 = zeros (2 * length(data),1);  % initialization of array for output sequence of self-made encoder (before puncturing)
+reg = zeros (2,1); % initialization of array to store states of registers
+j = 1; 
+for i = 1:length(data) % encoding cycle (without puncturing)
+     if (reg(1,1) == 0) && (reg(2,1) == 0) 
+         if data(i) == 0 
+             enc6 (j,1) = 0; 
+             enc6 (j+1,1) = 0;
+             reg (1,1) = 0; 
+             reg (2,1) = 0;
+             j = j + 2;
+             continue; 
+         else 
+             enc6 (j,1) = 1; 
+             enc6 (j+1,1) = 1;
+             reg (1,1) = 0; 
+             reg (2,1) = 1;
+             j = j + 2;
+             continue;
+         end 
+     end
+     
+     if (reg(1,1) == 0) && (reg(2,1) == 1) 
+         if data(i) == 0 
+             enc6 (j,1) = 0; 
+             enc6 (j+1,1) = 1;
+             reg (1,1) = 1; 
+             reg (2,1) = 0;
+             j = j + 2;
+             continue;
+         else 
+             enc6 (j,1) = 1; 
+             enc6 (j+1,1) = 0;
+             reg (1,1) = 1; 
+             reg (2,1) = 1;
+             j = j + 2;
+             continue;
+         end 
+     end
+     
+     if (reg(1,1) == 1) && (reg(2,1) == 1) 
+         if data(i) == 0 
+             enc6 (j,1) = 1;
+             enc6 (j+1,1) = 0;
+             reg (1,1) = 1; 
+             reg (2,1) = 0;
+             j = j + 2;
+             continue;
+         else 
+             enc6 (j,1) = 0; 
+             enc6 (j+1,1) = 1;
+             reg (1,1) = 1; 
+             reg (2,1) = 1;
+             j = j + 2;
+             continue;
+         end 
+     end
+    
+     if (reg(1,1) == 1) && (reg(2,1) == 0) 
+         if data(i) == 0 
+             enc6 (j,1) = 1; 
+             enc6 (j+1,1) = 1;
+             reg (1,1) = 0; 
+             reg (2,1) = 0;
+             j = j + 2;
+             continue;
+         else 
+             enc6 (j,1) = 0; 
+             enc6 (j+1,1) = 0;
+             reg (1,1) = 0;
+             reg (2,1) = 1;
+             j = j + 2;
+             continue;
+         end 
+     end
+end
+
+i = 0; % 
+k = 0; % 
+enc4 = zeros (((4 * length(data)) / 3),1); % initialization of array for output sequence of self-made encoder (after puncturing)
+
+for i = 1:length(enc6)
+    if mod(i,3) == 0 % puncturing of 3rd and 6th bits of output sequence
+        continue;
+    else 
+        k = k + 1; 
+        enc4(k,1) = enc6(i,1); % encoding result
+    end
+end
+end
